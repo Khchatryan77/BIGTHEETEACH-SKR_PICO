@@ -8,16 +8,10 @@ from register import REGISTORS
 # UART1 on GPIO8 (TX) and GPIO9 (RX)
 uart = UART(1, baudrate=115200, tx=Pin(8), rx=Pin(9))  # 115200 is more typical
 
-SLAVE_ADDR = 0x00
-# GCONF = 0x00
-# IFCNT = 0x02
-# IOIN = 0x06
-# TPWMTHRS = 0x22
-# IHOLD_IRUN = 0x10
-# CHOPCONF = 0x6C
-# GSTAT = 0x01
-# OTP_READ = 0x05
-# PWMCONF = 0x70
+SLAVE_ADDR_1 = 0x00
+SLAVE_ADDR_2 = 0x01
+SLAVE_ADDR_3 = 0x02
+SLAVE_ADDR_4 = 0x03
 
 Motors = {
     "Motor_X":{
@@ -60,7 +54,6 @@ def move_steps(motor_step_pin, motor_dir_pin, motor_en_pin, steps, direction, de
         time.sleep_us(delay_us)
     motor_en_pin.value(1)
 
-
 def crc8(datagram, initial_value=0):
     crc = initial_value
     # Iterate bytes in data
@@ -86,7 +79,8 @@ def response_uart():
                     response2 = uart.read(4)
                     if response2 is not None:
                         print('response', response + response2)
-                        print('IFCNT', response2[2])
+                        if response[2] == REGISTORS['IFCNT']:
+                            print('IFCNT', response2[2])
                     else:
                         pass
                         # print('response2 is None')
@@ -159,23 +153,36 @@ def write_register(slave, reg, value):
 
 while True:
 
-    # move_steps(Motors["Motor_X"]["step_pin"], Motors["Motor_X"]["dir_pin"], Motors["Motor_X"]["en_pin"], 1600, direction=1, delay_us=60)
+    move_steps(Motors["Motor_X"]["step_pin"], Motors["Motor_X"]["dir_pin"], Motors["Motor_X"]["en_pin"], 1600, direction=1, delay_us=60)
     # time.sleep(1)
 
-    move_steps(Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],Motors["Motor_Y"]["en_pin"],1600, direction=1, delay_us=60)
-    time.sleep(1)
+    # move_steps(Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],Motors["Motor_Y"]["en_pin"],1600, direction=1, delay_us=60)
+    # time.sleep(1)
+    #
+    # move_steps(Motors["Motor_Z"]["step_pin"], Motors["Motor_Z"]["dir_pin"],Motors["Motor_Z"]["en_pin"],1600, direction=1, delay_us=60)
+    # time.sleep(1)
+    #
+    # move_steps(Motors["Motor_E"]["step_pin"], Motors["Motor_E"]["dir_pin"],Motors["Motor_E"]["en_pin"],1600, direction=1, delay_us=60)
+    # time.sleep(1)
 
-    move_steps(Motors["Motor_Z"]["step_pin"], Motors["Motor_Z"]["dir_pin"],Motors["Motor_Z"]["en_pin"],1600, direction=1, delay_us=60)
-    time.sleep(1)
+    write_register(SLAVE_ADDR_1, REGISTORS['GCONF'], 0b11001000)
+    write_register(SLAVE_ADDR_1, REGISTORS['CHOPCONF'], 0x15000053)
 
-    write_register(SLAVE_ADDR, REGISTORS['GCONF'], 0b01001000)
-    read_register(SLAVE_ADDR, REGISTORS['GCONF'])
+    # write_register(SLAVE_ADDR_2, REGISTORS['GCONF'], 0b11001000)
+    # write_register(SLAVE_ADDR_2, REGISTORS['CHOPCONF'], 0x15000053)
+    #
+    # write_register(SLAVE_ADDR_3, REGISTORS['GCONF'], 0b11001000)
+    # write_register(SLAVE_ADDR_3, REGISTORS['CHOPCONF'], 0x15000053)
+    #
+    # write_register(SLAVE_ADDR_4, REGISTORS['GCONF'], 0b11001000)
+    # write_register(SLAVE_ADDR_4, REGISTORS['CHOPCONF'], 0x15000053)
+
     # time.sleep(0.2)
 
-    #read_register(SLAVE_ADDR, 0x6F)
+    read_register(SLAVE_ADDR_1, REGISTORS['CHOPCONF'])
 
     time.sleep(0.1)
-    read_register(SLAVE_ADDR, REGISTORS["IFCNT"])
+    read_register(SLAVE_ADDR_1, REGISTORS["IFCNT"])
     time.sleep(0.01)
     response_uart()
 

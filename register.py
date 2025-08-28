@@ -30,8 +30,8 @@ REGISTORS = {
 
     "TCOOLTHRS": 0x14,   # W
     "SGTHRS":  0x40,     # W
-    "SG_RESULT": 0x12,   # R
-    "COOLCONF": 0x22,    # W
+    "SG_RESULT": 0x41,   # R
+    "COOLCONF": 0x42,    # W
 
     # Sequencer Registers
 
