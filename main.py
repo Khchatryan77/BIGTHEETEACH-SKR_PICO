@@ -2,11 +2,17 @@ from machine import UART, Pin
 import time
 from register import REGISTORS
 
-#time.sleep(7)
-#import _thread
+time.sleep(8)
+import _thread
+
+FAN1 = Pin(17, Pin.OUT)
+
+buffer = []
 
 # UART1 on GPIO8 (TX) and GPIO9 (RX)
-uart = UART(1, baudrate=115200, tx=Pin(8), rx=Pin(9))  # 115200 is more typical
+uart1 = UART(1, baudrate=115200, tx=Pin(8), rx=Pin(9))  # 115200 is more typical
+
+uart0 = UART(0, baudrate=115200, tx=Pin(0), rx=Pin(1))  # 115200 is more typical
 
 SLAVE_ADDR_1 = 0x00
 SLAVE_ADDR_2 = 0x01
@@ -43,6 +49,12 @@ Motors["Motor_X"]["en_pin"].on()
 Motors["Motor_Y"]["en_pin"].on()
 Motors["Motor_Z"]["en_pin"].on()
 
+def uart0_handler():
+    if uart0.any():  # check if there is data
+        data = uart0.read().decode().strip()  # read all available data
+        buffer.append(data)
+        print("Received:", data)
+        return data
 
 def move_steps(motor_step_pin, motor_dir_pin, motor_en_pin, steps, direction, delay_us=20):
     motor_dir_pin.value(direction)  # 0 or 1
@@ -53,6 +65,21 @@ def move_steps(motor_step_pin, motor_dir_pin, motor_en_pin, steps, direction, de
         motor_step_pin.low()
         time.sleep_us(delay_us)
     motor_en_pin.value(1)
+
+def move_steper_sync(motor_step_pin1, motor_dir_pin1, motor_en_pin1, motor_step_pin2, motor_dir_pin2, motor_en_pin2,  steps, direction, delay_us=20):
+    motor_dir_pin1.value(direction)  # 0 or 1
+    motor_en_pin1.value(0)
+    motor_dir_pin2.value(direction)  # 0 or 1
+    motor_en_pin2.value(0)
+    for _ in range(steps):
+        motor_step_pin2.high()
+        motor_step_pin1.high()
+        time.sleep_us(delay_us)
+        motor_step_pin1.low()
+        motor_step_pin2.low()
+        time.sleep_us(delay_us)
+    motor_en_pin1.value(1)
+    motor_en_pin2.value(1)
 
 def crc8(datagram, initial_value=0):
     crc = initial_value
@@ -69,14 +96,14 @@ def crc8(datagram, initial_value=0):
     return crc
 
 def response_uart():
-    if uart.any():
+    if uart1.any():
         # R = uart.read()
         # print('R', R)
         for i in range(10):
-            response = uart.read(4)
+            response = uart1.read(4)
             if response is not None and len(response) >= 2:
                 if response[1] == 255:
-                    response2 = uart.read(4)
+                    response2 = uart1.read(4)
                     if response2 is not None:
                         print('response', response + response2)
                         if response[2] == REGISTORS['IFCNT']:
@@ -94,39 +121,13 @@ def response_uart():
          print("Invalid read response:")
     time.sleep_us(50)
 
-# def response_uart():
-#     if uart.any():
-#         R = uart.readline()
-#         print('R', R)
-#         for i in range(10):
-#             response = uart.read(1)
-#             if response is not None and len(response) >= 2:
-#                 if response[1] == 255:
-#                     response2 = uart.read(4)
-#                     if response2 is not None:
-#                         print('response', response + response2)
-#                         print('IFCNT', response2[2])
-#                     else:
-#                         pass
-#                         # print('response2 is None')
-#                 else:
-#                     pass
-#                     # print('Its Echo')
-#             else:
-#                 pass
-#                 # print('response is None or too short')
-#     else:
-#          print("Invalid read response:")
-#     time.sleep_us(50)
-
 def read_register(slave, reg):
     sync = 0x05
     addr = slave
     packet = [sync, addr, reg]
     crc = crc8(packet)
-    uart.write(bytearray(packet + [crc]))
+    uart1.write(bytearray(packet + [crc]))
     time.sleep_us(140)  #140
-
 
 def write_register(slave, reg, value):
     sync = 0x05
@@ -143,46 +144,45 @@ def write_register(slave, reg, value):
     print('packet', packet)
     crc = crc8(packet)
 
-    uart.write(bytearray(packet + [crc]))
+    uart1.write(bytearray(packet + [crc]))
     time.sleep_us(500)
 
     response_uart()
 
-#second_thread = _thread.start_new_thread(response_uart(), ())
-# write_register(SLAVE_ADDR, GCONF, 0b00001000)  # shaft direction
+def core_1():
+    global Motors, uart0, buffer
+
+    while True:
+        if len(buffer) >= 1:
+            move_steper_sync(Motors["Motor_Z"]["step_pin"], Motors["Motor_Z"]["dir_pin"], Motors["Motor_Z"]["en_pin"],
+                                 Motors["Motor_E"]["step_pin"], Motors["Motor_E"]["dir_pin"], Motors["Motor_E"]["en_pin"], 1600, 1,100)
+
+            buffer.pop(0)
+
+write_register(SLAVE_ADDR_1, REGISTORS['GCONF'], 0b11001000)
+write_register(SLAVE_ADDR_2, REGISTORS['GCONF'], 0b11001000)
+write_register(SLAVE_ADDR_3, REGISTORS['GCONF'], 0b11001000)
+write_register(SLAVE_ADDR_4, REGISTORS['GCONF'], 0b11001000)
+
+write_register(SLAVE_ADDR_1, REGISTORS['CHOPCONF'], 0x15000053)
+write_register(SLAVE_ADDR_2, REGISTORS['CHOPCONF'], 0x15000053)
+write_register(SLAVE_ADDR_3, REGISTORS['CHOPCONF'], 0x15000053)
+write_register(SLAVE_ADDR_4, REGISTORS['CHOPCONF'], 0x15000053)
+
+FAN1.value(1)
+
+_thread.start_new_thread(core_1,())
+
 
 while True:
+    uart0_handler()
+    if len(buffer) >= 1:
+        # with lock:
+        move_steper_sync(Motors["Motor_X"]["step_pin"], Motors["Motor_X"]["dir_pin"], Motors["Motor_X"]["en_pin"],
+                             Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],Motors["Motor_Y"]["en_pin"],1600, 1, 100)
 
-    move_steps(Motors["Motor_X"]["step_pin"], Motors["Motor_X"]["dir_pin"], Motors["Motor_X"]["en_pin"], 1600, direction=1, delay_us=60)
-    # time.sleep(1)
 
-    # move_steps(Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],Motors["Motor_Y"]["en_pin"],1600, direction=1, delay_us=60)
-    # time.sleep(1)
-    #
-    # move_steps(Motors["Motor_Z"]["step_pin"], Motors["Motor_Z"]["dir_pin"],Motors["Motor_Z"]["en_pin"],1600, direction=1, delay_us=60)
-    # time.sleep(1)
-    #
-    # move_steps(Motors["Motor_E"]["step_pin"], Motors["Motor_E"]["dir_pin"],Motors["Motor_E"]["en_pin"],1600, direction=1, delay_us=60)
-    # time.sleep(1)
-
-    write_register(SLAVE_ADDR_1, REGISTORS['GCONF'], 0b11001000)
-    write_register(SLAVE_ADDR_1, REGISTORS['CHOPCONF'], 0x15000053)
-
-    # write_register(SLAVE_ADDR_2, REGISTORS['GCONF'], 0b11001000)
-    # write_register(SLAVE_ADDR_2, REGISTORS['CHOPCONF'], 0x15000053)
-    #
-    # write_register(SLAVE_ADDR_3, REGISTORS['GCONF'], 0b11001000)
-    # write_register(SLAVE_ADDR_3, REGISTORS['CHOPCONF'], 0x15000053)
-    #
-    # write_register(SLAVE_ADDR_4, REGISTORS['GCONF'], 0b11001000)
-    # write_register(SLAVE_ADDR_4, REGISTORS['CHOPCONF'], 0x15000053)
-
-    # time.sleep(0.2)
-
-    read_register(SLAVE_ADDR_1, REGISTORS['CHOPCONF'])
-
-    time.sleep(0.1)
-    read_register(SLAVE_ADDR_1, REGISTORS["IFCNT"])
-    time.sleep(0.01)
-    response_uart()
+    # read_register(SLAVE_ADDR_1, REGISTORS["IFCNT"])
+    # time.sleep(0.01)
+    # response_uart()
 
