@@ -23,22 +23,26 @@ Motors = {
     "Motor_X":{
         "step_pin": Pin(11, Pin.OUT),
         "dir_pin": Pin(10, Pin.OUT),
-        "en_pin": Pin(12, Pin.OUT)
+        "en_pin": Pin(12, Pin.OUT),
+        "End_stop_X": Pin(4, Pin.OUT)
     },
     "Motor_Y":{
         "step_pin": Pin(6, Pin.OUT),
         "dir_pin": Pin(5, Pin.OUT),
-        "en_pin": Pin(7, Pin.OUT)
+        "en_pin": Pin(7, Pin.OUT),
+        "End_stop_Y": Pin(3, Pin.OUT)
     },
     "Motor_Z": {
         "step_pin": Pin(19, Pin.OUT),
         "dir_pin": Pin(28, Pin.OUT),
-        "en_pin": Pin(2, Pin.OUT)
+        "en_pin": Pin(2, Pin.OUT),
+        "End_stop_Z": Pin(14, Pin.OUT)
     },
     "Motor_E": {
         "step_pin": Pin(14, Pin.OUT),
         "dir_pin": Pin(13, Pin.OUT),
-        "en_pin": Pin(15, Pin.OUT)
+        "en_pin": Pin(15, Pin.OUT),
+        "End_stop_E": Pin(4, Pin.OUT)
     }
 }
 
@@ -48,6 +52,14 @@ Motors = {
 Motors["Motor_X"]["en_pin"].on()
 Motors["Motor_Y"]["en_pin"].on()
 Motors["Motor_Z"]["en_pin"].on()
+
+Running = True
+
+def end_stop_handler(pin):
+    global Running
+    Running= False
+
+Motors['Motor_X']['End_stop_X'].irq(trigger=Pin.IRQ_FALLING, handler=end_stop_handler)
 
 def uart0_handler():
     if uart0.any():  # check if there is data
@@ -150,12 +162,12 @@ def write_register(slave, reg, value):
     response_uart()
 
 def core_1():
-    global Motors, uart0, buffer
+    global Motors, uart0, buffer, Running
 
-    while True:
+    while Running:
         if len(buffer) >= 1:
             move_steper_sync(Motors["Motor_Z"]["step_pin"], Motors["Motor_Z"]["dir_pin"], Motors["Motor_Z"]["en_pin"],
-                                 Motors["Motor_E"]["step_pin"], Motors["Motor_E"]["dir_pin"], Motors["Motor_E"]["en_pin"], 1600, 1,100)
+                                 Motors["Motor_E"]["step_pin"], Motors["Motor_E"]["dir_pin"], Motors["Motor_E"]["en_pin"], 16000, 1,100)
 
             buffer.pop(0)
 
@@ -173,16 +185,18 @@ FAN1.value(1)
 
 _thread.start_new_thread(core_1,())
 
-
-while True:
+while Running:
     uart0_handler()
     if len(buffer) >= 1:
         # with lock:
         move_steper_sync(Motors["Motor_X"]["step_pin"], Motors["Motor_X"]["dir_pin"], Motors["Motor_X"]["en_pin"],
-                             Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],Motors["Motor_Y"]["en_pin"],1600, 1, 100)
+                             Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],Motors["Motor_Y"]["en_pin"],16000, 1, 100)
 
+    #print('buffer', buffer)
+    print(Motors['Motor_X']['End_stop_X'].value())
+    if Motors['Motor_X']['End_stop_X'].value() == 0:
+        break
 
     # read_register(SLAVE_ADDR_1, REGISTORS["IFCNT"])
     # time.sleep(0.01)
     # response_uart()
-
