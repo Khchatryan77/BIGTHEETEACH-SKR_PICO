@@ -1,9 +1,22 @@
 from machine import UART, Pin
 import time
 from register import REGISTORS
+import rp2
+import uasyncio as asyncio
 
 time.sleep(8)
 import _thread
+
+state = None
+
+
+@rp2.asm_pio(autopush=True, push_thresh=1)
+def end_stop_pio():
+    in_(pins, 1)
+
+
+sm = rp2.StateMachine(0, end_stop_pio, freq=20000, in_base=Pin(4))
+sm.active(1)
 
 FAN1 = Pin(17, Pin.OUT)
 
@@ -20,13 +33,13 @@ SLAVE_ADDR_3 = 0x02
 SLAVE_ADDR_4 = 0x03
 
 Motors = {
-    "Motor_X":{
+    "Motor_X": {
         "step_pin": Pin(11, Pin.OUT),
         "dir_pin": Pin(10, Pin.OUT),
         "en_pin": Pin(12, Pin.OUT),
         "End_stop_X": Pin(4, Pin.OUT)
     },
-    "Motor_Y":{
+    "Motor_Y": {
         "step_pin": Pin(6, Pin.OUT),
         "dir_pin": Pin(5, Pin.OUT),
         "en_pin": Pin(7, Pin.OUT),
@@ -55,11 +68,14 @@ Motors["Motor_Z"]["en_pin"].on()
 
 Running = True
 
+'''
 def end_stop_handler(pin):
     global Running
     Running= False
+'''
 
-Motors['Motor_X']['End_stop_X'].irq(trigger=Pin.IRQ_FALLING, handler=end_stop_handler)
+
+# Motors['Motor_X']['End_stop_X'].irq(trigger=Pin.IRQ_FALLING, handler=end_stop_handler)
 
 def uart0_handler():
     if uart0.any():  # check if there is data
@@ -67,6 +83,7 @@ def uart0_handler():
         buffer.append(data)
         print("Received:", data)
         return data
+
 
 def move_steps(motor_step_pin, motor_dir_pin, motor_en_pin, steps, direction, delay_us=20):
     motor_dir_pin.value(direction)  # 0 or 1
@@ -78,11 +95,14 @@ def move_steps(motor_step_pin, motor_dir_pin, motor_en_pin, steps, direction, de
         time.sleep_us(delay_us)
     motor_en_pin.value(1)
 
-def move_steper_sync(motor_step_pin1, motor_dir_pin1, motor_en_pin1, motor_step_pin2, motor_dir_pin2, motor_en_pin2,  steps, direction, delay_us=20):
+
+def move_steper_sync(motor_step_pin1, motor_dir_pin1, motor_en_pin1, motor_step_pin2, motor_dir_pin2, motor_en_pin2,
+                     steps, direction, delay_us=20):
     motor_dir_pin1.value(direction)  # 0 or 1
     motor_en_pin1.value(0)
     motor_dir_pin2.value(direction)  # 0 or 1
     motor_en_pin2.value(0)
+
     for _ in range(steps):
         motor_step_pin2.high()
         motor_step_pin1.high()
@@ -90,14 +110,16 @@ def move_steper_sync(motor_step_pin1, motor_dir_pin1, motor_en_pin1, motor_step_
         motor_step_pin1.low()
         motor_step_pin2.low()
         time.sleep_us(delay_us)
+
     motor_en_pin1.value(1)
     motor_en_pin2.value(1)
+
 
 def crc8(datagram, initial_value=0):
     crc = initial_value
     # Iterate bytes in data
     for byte in datagram:
-         # Iterate bits in byte
+        # Iterate bits in byte
         for _ in range(0, 8):
             if (crc >> 7) ^ (byte & 0x01):
                 crc = ((crc << 1) ^ 0x07) & 0xFF
@@ -106,6 +128,7 @@ def crc8(datagram, initial_value=0):
             # Shift to next bit
             byte = byte >> 1
     return crc
+
 
 def response_uart():
     if uart1.any():
@@ -130,8 +153,9 @@ def response_uart():
                 pass
                 # print('response is None or too short')
     else:
-         print("Invalid read response:")
+        print("Invalid read response:")
     time.sleep_us(50)
+
 
 def read_register(slave, reg):
     sync = 0x05
@@ -139,7 +163,8 @@ def read_register(slave, reg):
     packet = [sync, addr, reg]
     crc = crc8(packet)
     uart1.write(bytearray(packet + [crc]))
-    time.sleep_us(140)  #140
+    time.sleep_us(140)  # 140
+
 
 def write_register(slave, reg, value):
     sync = 0x05
@@ -151,7 +176,6 @@ def write_register(slave, reg, value):
             (value >> 8) & 0xFF,
             value & 0xFF]
 
-
     packet = [sync, addr, reg_write] + data
     print('packet', packet)
     crc = crc8(packet)
@@ -161,15 +185,18 @@ def write_register(slave, reg, value):
 
     response_uart()
 
+
 def core_1():
     global Motors, uart0, buffer, Running
 
     while Running:
         if len(buffer) >= 1:
             move_steper_sync(Motors["Motor_Z"]["step_pin"], Motors["Motor_Z"]["dir_pin"], Motors["Motor_Z"]["en_pin"],
-                                 Motors["Motor_E"]["step_pin"], Motors["Motor_E"]["dir_pin"], Motors["Motor_E"]["en_pin"], 16000, 1,100)
+                             Motors["Motor_E"]["step_pin"], Motors["Motor_E"]["dir_pin"], Motors["Motor_E"]["en_pin"],
+                             16000, 1, 100)
 
             buffer.pop(0)
+
 
 write_register(SLAVE_ADDR_1, REGISTORS['GCONF'], 0b11001000)
 write_register(SLAVE_ADDR_2, REGISTORS['GCONF'], 0b11001000)
@@ -183,20 +210,53 @@ write_register(SLAVE_ADDR_4, REGISTORS['CHOPCONF'], 0x15000053)
 
 FAN1.value(1)
 
-_thread.start_new_thread(core_1,())
+_thread.start_new_thread(core_1, ())
 
-while Running:
-    uart0_handler()
-    if len(buffer) >= 1:
-        # with lock:
-        move_steper_sync(Motors["Motor_X"]["step_pin"], Motors["Motor_X"]["dir_pin"], Motors["Motor_X"]["en_pin"],
-                             Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],Motors["Motor_Y"]["en_pin"],16000, 1, 100)
+prev_state = 1
 
-    #print('buffer', buffer)
-    print(Motors['Motor_X']['End_stop_X'].value())
-    if Motors['Motor_X']['End_stop_X'].value() == 0:
-        break
 
-    # read_register(SLAVE_ADDR_1, REGISTORS["IFCNT"])
-    # time.sleep(0.01)
-    # response_uart()
+async def check_endstop():
+    global Running, prev_state
+
+    while Running:
+        if sm.rx_fifo():  # check if FIFO has data
+            val = sm.get() & 0x1  # take only the least significant bit
+            if val != prev_state:
+                if val == 0:
+                    print("End-stop PRESSED")
+                    Running = False
+                else:
+                    print("End-stop NOT pressed")
+                prev_state = val
+
+        await asyncio.sleep(0.001)
+
+
+async def motor_move():
+    global Running, buffer, uart0_handler
+
+    while Running:
+        uart0_handler()
+
+        if len(buffer) >= 1:
+
+            for i in range(0, 16000, 100):
+                move_steper_sync(Motors["Motor_X"]["step_pin"], Motors["Motor_X"]["dir_pin"],
+                                 Motors["Motor_X"]["en_pin"],
+                                 Motors["Motor_Y"]["step_pin"], Motors["Motor_Y"]["dir_pin"],
+                                 Motors["Motor_Y"]["en_pin"], 100, 1, 98)
+
+                await asyncio.sleep(0)
+
+
+async def main():
+    asyncio.create_task(motor_move())
+    asyncio.create_task(check_endstop())
+    while Running:
+        await asyncio.sleep(0.001)  # main loop idle
+
+
+asyncio.run(main())
+
+
+
